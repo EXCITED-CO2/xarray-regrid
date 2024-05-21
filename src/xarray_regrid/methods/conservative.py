@@ -14,6 +14,8 @@ def conservative_regrid(
     data: xr.DataArray,
     target_ds: xr.Dataset,
     latitude_coord: str | None,
+    skipna: bool = True,
+    nan_threshold: float = 1.0,
 ) -> xr.DataArray:
     ...
 
@@ -23,6 +25,8 @@ def conservative_regrid(
     data: xr.Dataset,
     target_ds: xr.Dataset,
     latitude_coord: str | None,
+    skipna: bool = True,
+    nan_threshold: float = 1.0,
 ) -> xr.Dataset:
     ...
 
@@ -31,6 +35,8 @@ def conservative_regrid(
     data: xr.DataArray | xr.Dataset,
     target_ds: xr.Dataset,
     latitude_coord: str | None,
+    skipna: bool = True,
+    nan_threshold: float = 1.0,
 ) -> xr.DataArray | xr.Dataset:
     """Refine a dataset using conservative regridding.
 
@@ -44,16 +50,27 @@ def conservative_regrid(
     Args:
         data: Input dataset.
         target_ds: Dataset which coordinates the input dataset should be regrid to.
+        latitude_coord: Name of the latitude coordinate. If not provided, attempt to
+            infer it from the first coordinate containing the string 'lat'.
+        skipna: If True, enable handling for NaN values. This adds some overhead,
+            so should be disabled for optimal performance on data without NaNs.
+        nan_threshold: Threshold value that will retain any output points containing
+            at least this many non-null input points. The default value is 1.0,
+            which will keep output points containing any non-null inputs. The threshold
+            is applied sequentially to each dimension, and may produce different results
+            than a threshold applied concurrently to all regridding dimensions.
 
     Returns:
         Regridded input dataset
     """
-    if latitude_coord is not None:
-        if latitude_coord not in data.coords:
-            msg = "Latitude coord not in input data!"
-            raise ValueError(msg)
-    else:
-        latitude_coord = ""
+    if latitude_coord is None:
+        for coord in data.coords:
+            if "lat" in coord.lower():
+                latitude_coord = coord
+                break
+    if latitude_coord not in data.coords:
+        msg = "Latitude coord not in input data!"
+        raise ValueError(msg)
 
     dim_order = list(target_ds.dims)
 
@@ -64,11 +81,11 @@ def conservative_regrid(
 
     if isinstance(data, xr.Dataset):
         regridded_data = conservative_regrid_dataset(
-            data, coords, latitude_coord
+            data, coords, latitude_coord, skipna, nan_threshold
         ).transpose(*dim_order, ...)
     else:
         regridded_data = conservative_regrid_dataarray(  # type: ignore
-            data, coords, latitude_coord
+            data, coords, latitude_coord, skipna, nan_threshold
         ).transpose(*dim_order, ...)
 
     regridded_data = regridded_data.reindex_like(target_ds, copy=False)
@@ -80,6 +97,8 @@ def conservative_regrid_dataset(
     data: xr.Dataset,
     coords: dict[Hashable, xr.DataArray],
     latitude_coord: str,
+    skipna: bool,
+    nan_threshold: float,
 ) -> xr.Dataset:
     """Dataset implementation of the conservative regridding method."""
     data_vars = list(data.data_vars)
@@ -112,7 +131,9 @@ def conservative_regrid_dataset(
         for i in range(len(dataarrays)):
             if coord in dataarrays[i].coords:
                 da = dataarrays[i].transpose(coord, ...)
-                dataarrays[i] = apply_weights(da, weights, coord, target_coords)
+                dataarrays[i] = apply_weights(
+                    da, weights, coord, target_coords, skipna, nan_threshold
+                )
 
     for da, attr in zip(dataarrays, da_attrs, strict=True):
         da.attrs = attr
@@ -135,6 +156,8 @@ def conservative_regrid_dataarray(
     data: xr.DataArray,
     coords: dict[Hashable, xr.DataArray],
     latitude_coord: str,
+    skipna: bool,
+    nan_threshold: float,
 ) -> xr.DataArray:
     """DataArray implementation of the conservative regridding method."""
     data_coords = list(data.coords)
@@ -162,7 +185,9 @@ def conservative_regrid_dataarray(
                 weights = dot_array.to_numpy()
 
             data = data.transpose(coord, ...)
-            data = apply_weights(data, weights, coord, target_coords)
+            data = apply_weights(
+                data, weights, coord, target_coords, skipna, nan_threshold
+            )
 
             # Replace zeros outside of original data grid with NaNs
             data = data.where(uncovered_target_grid)
@@ -176,16 +201,17 @@ def conservative_regrid_dataarray(
 
 
 def apply_weights(
-    da: xr.DataArray, weights: np.ndarray, coord_name: Hashable, new_coords: np.ndarray
+    da: xr.DataArray,
+    weights: np.ndarray,
+    coord_name: Hashable,
+    new_coords: np.ndarray,
+    skipna: bool,
+    nan_threshold: float,
 ) -> xr.DataArray:
     """Apply the weights to convert data to the new coordinates."""
     new_data: np.ndarray | dask.array.Array
-    if da.chunks is not None:
-        # Dask routine
-        new_data = compute_einsum_dask(da, weights)
-    else:
-        # numpy routine
-        new_data = compute_einsum_numpy(da, weights)
+
+    new_data = compute_einsum(da, weights, skipna, nan_threshold)
 
     coord_mapping = {coord_name: new_coords}
     coords = list(da.dims)
@@ -200,34 +226,46 @@ def apply_weights(
     )
 
 
-def compute_einsum_dask(da: xr.DataArray, weights: np.ndarray) -> dask.array.Array:
-    """Compute the einsum between dask data and weights, and mask NaNs if needed."""
-    new_data: dask.array.Array
-    if np.any(np.isnan(da.data)):
-        new_data = dask.array.einsum(
-            "i...,ij->j...", da.fillna(0).data, weights, optimize="greedy"
-        )
-        isnan = dask.array.einsum(
-            "i...,ij->j...", np.isnan(da.data), weights, optimize="greedy"
-        )
-        new_data[isnan > 0] = np.nan
+def compute_einsum(
+    da: xr.DataArray, weights: np.ndarray, skipna: bool, nan_threshold: float
+) -> np.ndarray | dask.array.Array:
+    """Compute the einsum between the data and weights. If nan-skipping is
+    enabled, renormalize the weights by the non-null input points, and keep
+    output points containing up to the specified fraction of NaN values."""
+    new_data: np.ndarray | dask.array.Array
+
+    if skipna:
+        data = da.fillna(0).data
+        notnull = da.notnull().data
     else:
-        new_data = dask.array.einsum(
-            "i...,ij->j...", da.data, weights, optimize="greedy"
+        data = da.data
+
+    backend = np if da.chunks is None else dask.array
+    new_data = backend.einsum(
+        "i...,ij->j...", data, weights, optimize="greedy"
+    )
+
+    if skipna:
+        valid_weight_sum = backend.einsum(
+            "i...,ij->j...", notnull, weights, optimize="greedy"
         )
+        new_data = new_data / backend.clip(valid_weight_sum, 1e-6, None)
+        weight_threshold = get_weight_threshold(nan_threshold)
+        new_data = backend.where(valid_weight_sum > weight_threshold, new_data, np.nan)
+
     return new_data
 
 
-def compute_einsum_numpy(da: xr.DataArray, weights: np.ndarray) -> np.ndarray:
-    """Compute the einsum between numpy data and weights, and mask NaNs if needed."""
-    new_data: np.ndarray
-    if np.any(np.isnan(da.data)):
-        new_data = np.einsum("i...,ij->j...", da.fillna(0).data, weights)
-        isnan = np.einsum("i...,ij->j...", np.isnan(da.data), weights)
-        new_data[isnan > 0] = np.nan
-    else:
-        new_data = np.einsum("i...,ij->j...", da.data, weights)
-    return new_data
+def get_weight_threshold(nan_threshold: float) -> float:
+    """Make sure the specified nan_threshold is in [0,1], invert it,
+    and coerce to just above zero and below one to handle numerical
+    precision limitations in the weight sum."""
+    if not 0.0 <= nan_threshold <= 1.0:
+        msg = "nan_threshold must be between [0, 1]]"
+        raise ValueError(msg)
+    # This matches xesmf where na_thresh=0 keeps points with any valid data
+    weight_threshold = 1 - np.clip(nan_threshold, 1e-6, 1.0 - 1e-6)
+    return weight_threshold
 
 
 def get_weights(source_coords: np.ndarray, target_coords: np.ndarray) -> np.ndarray:

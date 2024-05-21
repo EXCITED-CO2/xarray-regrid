@@ -73,8 +73,10 @@ class Regridder:
     def conservative(
         self,
         ds_target_grid: xr.Dataset,
-        latitude_coord: str | None,
+        latitude_coord: str | None = None,
         time_dim: str = "time",
+        skipna: bool = True,
+        nan_threshold: float = 1.0,
     ) -> xr.DataArray | xr.Dataset:
         """Regrid to the coords of the target dataset with a conservative scheme.
 
@@ -83,6 +85,14 @@ class Regridder:
             latitude_coord: Name of the latitude coord, to be used for applying the
                 spherical correction.
             time_dim: The name of the time dimension/coordinate.
+            skipna: If True, enable handling for NaN values. This adds some overhead,
+                so should be disabled for optimal performance on data without NaNs.
+            nan_threshold: Threshold value that will retain any output points
+                containing at least this many non-null input points. The default value
+                is 1.0, which will keep output points containing any non-null inputs.
+                The threshold is applied sequentially to each dimension, and may
+                produce different results than a threshold applied concurrently to all
+                regridding dimensions.
 
         Returns:
             Data regridded to the target dataset coordinates.
@@ -90,7 +100,7 @@ class Regridder:
 
         ds_target_grid = validate_input(self._obj, ds_target_grid, time_dim)
         return conservative.conservative_regrid(
-            self._obj, ds_target_grid, latitude_coord
+            self._obj, ds_target_grid, latitude_coord, skipna, nan_threshold
         )
 
     def most_common(
