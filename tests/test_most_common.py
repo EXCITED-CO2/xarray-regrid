@@ -97,14 +97,14 @@ def test_most_common(dummy_lc_data, dummy_target_grid):
 def test_oversized_most_common(dummy_lc_data, oversized_dummy_target_grid):
     expected_data = np.array(
         [
-            [np.NaN, np.NaN, np.NaN, np.NaN, np.NaN, np.NaN, np.NaN, np.NaN],
-            [np.NaN, 2, 2, 0, 0, 0, 0, np.NaN],
-            [np.NaN, 0, 0, 0, 0, 0, 0, np.NaN],
-            [np.NaN, 0, 0, 0, 0, 0, 0, np.NaN],
-            [np.NaN, 0, 0, 0, 0, 0, 0, np.NaN],
-            [np.NaN, 0, 0, 0, 0, 0, 0, np.NaN],
-            [np.NaN, 3, 3, 0, 0, 0, 1, np.NaN],
-            [np.NaN, np.NaN, np.NaN, np.NaN, np.NaN, np.NaN, np.NaN, np.NaN],
+            [np.nan, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan],
+            [np.nan, 2, 2, 0, 0, 0, 0, np.nan],
+            [np.nan, 0, 0, 0, 0, 0, 0, np.nan],
+            [np.nan, 0, 0, 0, 0, 0, 0, np.nan],
+            [np.nan, 0, 0, 0, 0, 0, 0, np.nan],
+            [np.nan, 0, 0, 0, 0, 0, 0, np.nan],
+            [np.nan, 3, 3, 0, 0, 0, 1, np.nan],
+            [np.nan, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan],
         ]
     )
 

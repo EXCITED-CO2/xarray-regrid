@@ -50,6 +50,7 @@ dev = [
   "pytest",
   "pytest-cov",
   "pandas-stubs", # Adds typing for pandas.
+  "cftime",
 ]
 
 [tool.hatch.version]
@@ -84,7 +85,6 @@ select = [
   "E",
   "EM",
   "F",
-  "FBT",
   "I",
   "ICN",
   "ISC",
@@ -105,8 +105,6 @@ select = [
 ignore = [
   # Allow non-abstract empty methods in abstract base classes
   "B027",
-  # Allow boolean positional values in function calls, like `dict.get(... True)`
-  "FBT003",
   # Ignore checks for possible passwords
   "S105", "S106", "S107",
   # Ignore complexity

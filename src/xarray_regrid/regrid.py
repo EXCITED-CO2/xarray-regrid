@@ -73,24 +73,39 @@ class Regridder:
     def conservative(
         self,
         ds_target_grid: xr.Dataset,
-        latitude_coord: str | None,
+        latitude_coord: str | None = None,
         time_dim: str = "time",
+        skipna: bool = True,
+        nan_threshold: float = 0.0,
     ) -> xr.DataArray | xr.Dataset:
         """Regrid to the coords of the target dataset with a conservative scheme.
 
         Args:
             ds_target_grid: Dataset containing the target coordinates.
             latitude_coord: Name of the latitude coord, to be used for applying the
-                spherical correction.
+                spherical correction. By default, attempt to infer a latitude coordinate
+                as anything starting with "lat".
             time_dim: The name of the time dimension/coordinate.
+            skipna: If True, enable handling for NaN values. This adds some overhead,
+                so can be disabled for optimal performance on data without any NaNs.
+                Warning: with `skipna=False`, isolated NaNs will propagate throughout
+                the dataset due to the sequential regridding scheme over each dimension.
+            nan_threshold: Threshold value that will retain any output points
+                containing at least this many non-null input points. The default value
+                is 1.0, which will keep output points containing any non-null inputs,
+                while a value of 0.0 will only keep output points where all inputs are
+                non-null.
 
         Returns:
             Data regridded to the target dataset coordinates.
         """
+        if not 0.0 <= nan_threshold <= 1.0:
+            msg = "nan_threshold must be between [0, 1]]"
+            raise ValueError(msg)
 
         ds_target_grid = validate_input(self._obj, ds_target_grid, time_dim)
         return conservative.conservative_regrid(
-            self._obj, ds_target_grid, latitude_coord
+            self._obj, ds_target_grid, latitude_coord, skipna, nan_threshold
         )
 
     def most_common(
