@@ -164,10 +164,10 @@ class Regridder:
 
         if isinstance(self._obj, xr.Dataset):
             msg = (
-                "The 'most common value' regridder is not implemented for\n",
+                "The 'most common value' regridder is not implemented for\n"
                 "xarray.Dataset, as it requires specifying the expected labels.\n"
                 "Please select only a single variable (as DataArray),\n"
-                " and regrid it separately.",
+                " and regrid it separately."
             )
             raise ValueError(msg)
 
@@ -216,10 +216,10 @@ class Regridder:
 
         if isinstance(self._obj, xr.Dataset):
             msg = (
-                "The 'least common value' regridder is not implemented for\n",
+                "The 'least common value' regridder is not implemented for\n"
                 "xarray.Dataset, as it requires specifying the expected labels.\n"
                 "Please select only a single variable (as DataArray),\n"
-                " and regrid it separately.",
+                " and regrid it separately."
             )
             raise ValueError(msg)
 
