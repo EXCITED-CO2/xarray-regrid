@@ -1,6 +1,6 @@
 """Methods based on xr.interp."""
 
-from typing import Literal, overload
+from typing import Literal, cast, overload
 
 import xarray as xr
 
@@ -49,4 +49,4 @@ def interp_regrid(
     for coord in coord_names:
         interped[coord].attrs = coord_attrs[coord]
 
-    return interped
+    return cast("xr.DataArray | xr.Dataset", interped)

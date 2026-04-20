@@ -1,6 +1,6 @@
 from collections.abc import Callable, Hashable
 from dataclasses import dataclass
-from typing import Any, TypedDict, overload
+from typing import Any, TypedDict, cast, overload
 
 import numpy as np
 import pandas as pd
@@ -219,9 +219,12 @@ def call_on_dataset(
         msg = "Trying to convert Dataset with more than one data variable to DataArray"
         if len(result.data_vars) > 1:
             raise TypeError(msg)
-        return next(iter(result.data_vars.values())).rename(obj.name)
+        return cast(
+            "xr.DataArray",
+            next(iter(result.data_vars.values())).rename(obj.name),
+        )
 
-    return result
+    return cast("xr.DataArray | xr.Dataset", result)
 
 
 @overload
@@ -283,7 +286,7 @@ def format_for_regrid(
                 if len(obj[var].chunksizes.get(coord, ())) == 1:
                     result[var] = result[var].chunk({coord: -1})
 
-    return result
+    return cast("xr.DataArray | xr.Dataset", result)
 
 
 def format_lat(
@@ -322,7 +325,7 @@ def format_lat(
         south_pole = obj.isel({lat_coord: 0})
         if lon_coord is not None:
             south_pole = south_pole.mean(lon_coord, keep_attrs=True)
-        obj = xr.concat([south_pole, obj], dim=lat_coord)  # type: ignore
+        obj = xr.concat([south_pole, obj], dim=lat_coord)
         lat_vals = np.concatenate([[-polar_lat], lat_vals])
 
     # North pole
@@ -330,7 +333,7 @@ def format_lat(
         north_pole = obj.isel({lat_coord: -1})
         if lon_coord is not None:
             north_pole = north_pole.mean(lon_coord, keep_attrs=True)
-        obj = xr.concat([obj, north_pole], dim=lat_coord)  # type: ignore
+        obj = xr.concat([obj, north_pole], dim=lat_coord)
         lat_vals = np.concatenate([lat_vals, [polar_lat]])
 
     obj = update_coord(obj, lat_coord, lat_vals)

@@ -2,7 +2,7 @@
 
 import warnings
 from collections.abc import Hashable
-from typing import Any, overload
+from typing import Any, cast, overload
 
 import numpy as np
 import pandas as pd
@@ -70,7 +70,7 @@ def restore_properties(
             else:
                 result = result.where(covered, fill_value)
 
-    return result.transpose(*original_data.dims)
+    return cast("xr.DataArray | xr.Dataset", result.transpose(*original_data.dims))
 
 
 @overload
