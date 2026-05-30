@@ -3,10 +3,11 @@
 <img align="right" width="100" alt="Logo" src="./docs/assets/logo.png">
 
 
-With xarray-regrid it is possible to regrid between two rectilinear grids. The following methods are supported:
+With xarray-regrid you can regrid between rectilinear grids, and conservatively onto curvilinear grids, unstructured meshes, or arbitrary polygons (e.g. country shapes). The following methods are supported:
  - Linear
  - Nearest-neighbor
  - Conservative
+ - Conservative 2D: conservative regridding for grids that aren't 1D-separable — curvilinear coordinates, unstructured meshes, and grid-to-polygon aggregation
  - Cubic
  - "Most common value", as well as other zonal statistics (e.g., variance or median).
 
@@ -43,6 +44,12 @@ which includes optional extras such as:
  - `opt-einsum`: optimized einsum routines used in conservative regridding
 
 Benchmarking varies across different hardware specifications, but the inclusion of these extras can often provide significant speedups.
+
+For conservative regridding onto curvilinear grids, unstructured meshes, or polygons (the `conservative_2d` method), install the `conservative-2d` extra:
+```console
+pip install xarray-regrid[conservative-2d]
+```
+which adds `shapely`, `sparse`, and `h5netcdf` (the last for caching weight matrices to netCDF).
 
 ## Usage
 The xarray-regrid routines are accessed using the "regrid" accessor on an xarray Dataset:

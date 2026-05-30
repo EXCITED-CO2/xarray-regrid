@@ -4,7 +4,7 @@
 .ipynb_checkpoints
 .mypy_cache
 .ruff_cache
-.venv
+.venv*
 
 build
 dist
@@ -20,10 +20,11 @@ coverage.xml
 docs/_build
 docs/generated
 
-# ide
+# ide / agent tooling
 .idea
 .eclipse
 .vscode
+.claude
 
 # Mac
 .DS_Store

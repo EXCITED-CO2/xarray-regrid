@@ -4,7 +4,12 @@ from typing import Any, overload
 import numpy as np
 import xarray as xr
 
-from xarray_regrid.methods import conservative, flox_reduce, interp
+from xarray_regrid.methods import (
+    conservative,
+    conservative_2d,
+    flox_reduce,
+    interp,
+)
 from xarray_regrid.utils import format_for_regrid
 
 
@@ -17,7 +22,11 @@ class Regridder:
         linear: linear, bilinear, or higher dimensional linear interpolation
         nearest: nearest-neighbor regridding
         cubic: cubic spline regridding
-        conservative: conservative regridding
+        conservative: axis-factored conservative regridding (rectilinear,
+            1D-separable grids only)
+        conservative_2d: conservative regridding for grids that aren't
+            1D-separable — curvilinear 2D coords, unstructured meshes, or
+            arbitrary polygon-to-polygon aggregation (requires shapely)
         most_common: most common value regridder
         stat: area statistics regridder
     """
@@ -82,6 +91,67 @@ class Regridder:
         ds_formatted = format_for_regrid(self._obj, ds_target_grid)
         return interp.interp_regrid(ds_formatted, ds_target_grid, "cubic")
 
+    def conservative_2d(
+        self,
+        ds_target_grid: xr.Dataset,
+        x_coord: str = "longitude",
+        y_coord: str = "latitude",
+        manifold: conservative_2d.Manifold = "planar",
+        time_dim: str | None = "time",
+        skipna: bool = True,
+        nan_threshold: float = 1.0,
+        n_threads: int | None = None,
+    ) -> xr.DataArray | xr.Dataset:
+        """Conservative regrid for grids that aren't 1D-separable.
+
+        Use this when ``.conservative`` can't express your grid: curvilinear
+        coordinates (2D ``lat``/``lon`` arrays), unstructured meshes, or any
+        arbitrary polygon target. Computes 2D cell-polygon intersections via
+        shapely. Defaults to planar geometry; set ``manifold="cea"`` for
+        lat/lon grids in degrees to get proper spherical area weights via an
+        analytic cylindrical equal-area projection. Requires ``shapely >= 2.0``.
+
+        Args:
+            ds_target_grid: Dataset defining the target grid; must expose
+                ``x_coord`` and ``y_coord`` as coordinate variables.
+            x_coord: Name of the x (longitude-like) coordinate variable.
+            y_coord: Name of the y (latitude-like) coordinate variable.
+            manifold: Geometry backend. ``"planar"`` (default) intersects
+                shapely polygons in the user's coord space. ``"cea"`` projects
+                1D rectilinear lat/lon (degrees) into Lambert cylindrical
+                equal-area space before intersecting — proper spherical
+                areas at planar cost.
+            time_dim: Name of a time coordinate to drop from ``ds_target_grid``
+                before building the regridder (its first step is selected).
+                Source dims other than ``x_coord``/``y_coord`` — including
+                time — are broadcast over automatically. Defaults to ``"time"``;
+                pass ``None`` to skip the target-grid time handling.
+            skipna: If True, propagate NaNs into the weighted mean via a
+                two-pass sum.
+            nan_threshold: Keep output cells whose valid source fraction is at
+                least ``nan_threshold``.
+            n_threads: Thread count for parallel GEOS intersection. ``None``
+                auto-selects; set to ``1`` to disable threading.
+
+        Returns:
+            Data regridded to the target grid.
+        """
+        if not 0.0 <= nan_threshold <= 1.0:
+            msg = "nan_threshold must be between [0, 1]"
+            raise ValueError(msg)
+        ds_target_grid = validate_input(
+            self._obj, ds_target_grid, time_dim, require_shared_dims=False
+        )
+        regridder = conservative_2d.ConservativeRegridder(
+            self._obj,
+            ds_target_grid,
+            x_coord=x_coord,
+            y_coord=y_coord,
+            manifold=manifold,
+            n_threads=n_threads,
+        )
+        return regridder.regrid(self._obj, skipna=skipna, nan_threshold=nan_threshold)
+
     def conservative(
         self,
         ds_target_grid: xr.Dataset,
@@ -116,7 +186,7 @@ class Regridder:
             Data regridded to the target dataset coordinates.
         """
         if not 0.0 <= nan_threshold <= 1.0:
-            msg = "nan_threshold must be between [0, 1]]"
+            msg = "nan_threshold must be between [0, 1]"
             raise ValueError(msg)
 
         ds_target_grid = validate_input(self._obj, ds_target_grid, time_dim)
@@ -275,6 +345,7 @@ def validate_input(
     data: xr.Dataset,
     ds_target_grid: xr.Dataset,
     time_dim: str | None,
+    require_shared_dims: bool = ...,
 ) -> xr.Dataset: ...
 
 
@@ -283,6 +354,7 @@ def validate_input(
     data: xr.DataArray,
     ds_target_grid: xr.Dataset,
     time_dim: str | None,
+    require_shared_dims: bool = ...,
 ) -> xr.Dataset: ...
 
 
@@ -290,11 +362,14 @@ def validate_input(
     data: xr.DataArray | xr.Dataset,
     ds_target_grid: xr.Dataset,
     time_dim: str | None,
+    require_shared_dims: bool = True,
 ) -> xr.Dataset:
     if time_dim is not None and time_dim in ds_target_grid.coords:
         ds_target_grid = ds_target_grid.isel({time_dim: 0}).reset_coords()
 
-    if len(set(data.dims).intersection(set(ds_target_grid.dims))) == 0:
+    # Curvilinear regridders match source and target by coord values, not by
+    # dim name, so they opt out of the shared-dim requirement.
+    if require_shared_dims and not set(data.dims) & set(ds_target_grid.dims):
         msg = (
             "None of the target dims are in the data:\n"
             " regridding is not possible.\n"
@@ -303,7 +378,7 @@ def validate_input(
         )
         raise ValueError(msg)
 
-    if len(set(data.coords).intersection(set(ds_target_grid.coords))) == 0:
+    if not set(data.coords) & set(ds_target_grid.coords):
         msg = (
             "None of the target coords are in the data:\n"
             " regridding is not possible.\n"

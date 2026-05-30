@@ -29,9 +29,10 @@ Next load in the data you want to regrid, and the data with a grid you want to r
 Multiple regridding methods are available:
 
 * `linear interpolation <autoapi/xarray_regrid/regrid/index.html#xarray_regrid.regrid.Regridder.linear>`_ (``.regrid.linear``)
-* `nearest-neighbor <autoapi/xarray_regrid/regrid/index.html#xarray_regrid.regrid.Regridder.conservative>`_ (``.regrid.nearest``)
+* `nearest-neighbor <autoapi/xarray_regrid/regrid/index.html#xarray_regrid.regrid.Regridder.nearest>`_ (``.regrid.nearest``)
 * `cubic interpolation  <autoapi/xarray_regrid/regrid/index.html#xarray_regrid.regrid.Regridder.cubic>`_ (``.regrid.cubic``)
 * `conservative regridding <autoapi/xarray_regrid/regrid/index.html#xarray_regrid.regrid.Regridder.conservative>`_ (``.regrid.conservative``)
+* `conservative 2D regridding <autoapi/xarray_regrid/regrid/index.html#xarray_regrid.regrid.Regridder.conservative_2d>`_ (``.regrid.conservative_2d``) for curvilinear grids, unstructured meshes, and grid-to-polygon aggregation
 * `zonal statistics <autoapi/xarray_regrid/regrid/index.html#xarray_regrid.regrid.Regridder.stat>`_ (``.regrid.stat``) is available to compute statistics such as the maximum value, or variance. 
 
 Additionally, there are separate methods available to compute the

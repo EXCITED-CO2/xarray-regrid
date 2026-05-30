@@ -22,3 +22,11 @@ Most notebooks compare the methods implemented in xarray-regrid against more sta
   demos/demo_most_common.ipynb
   demos/demo_variance.ipynb
   demos/demo_conservative_nan_threshold.ipynb
+
+.. toctree::
+  :maxdepth: 1
+  :caption: Conservative 2D (curvilinear / unstructured / regions)
+
+  demos/demo_conservative_2d_curvilinear.ipynb
+  demos/demo_conservative_2d_unstructured.ipynb
+  demos/demo_conservative_2d_regions.ipynb
