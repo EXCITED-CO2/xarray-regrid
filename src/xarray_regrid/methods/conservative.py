@@ -4,6 +4,7 @@ from collections.abc import Hashable
 from typing import overload
 
 import numpy as np
+import scipy.sparse
 import xarray as xr
 
 try:
@@ -178,34 +179,101 @@ def conservative_regrid_dataset(
     return ds_regridded
 
 
+def _csr_apply_axis(
+    da: xr.DataArray, weight: xr.DataArray, coord: Hashable
+) -> xr.DataArray:
+    """Contract ``da`` along ``coord`` with ``weight`` via a scipy CSR matmul.
+
+    ``weight`` has dims ``(coord, target_{coord})``; the result replaces ``coord``
+    with ``target_{coord}``. A direct CSR sparse-dense matmul is fast and --
+    unlike the multi-operand sparse ``xr.dot`` -- does not need ``opt_einsum`` to
+    find an efficient contraction path. The weight is compressed to CSR (whether
+    stored as ``sparse.COO`` or dense), so the ``(n_src, n_dst)`` matrix is never
+    held dense; only the dense regridded result (one value per target cell) is
+    produced.
+    """
+    target_dim = f"target_{coord}"
+    target_coords = weight[target_dim].to_numpy()
+
+    wdata = weight.data
+    if hasattr(wdata, "compute"):  # dask-backed weight; materialize (it's small)
+        wdata = wdata.compute()
+    scipy_coo = (
+        wdata.to_scipy_sparse()
+        if sparse is not None and isinstance(wdata, sparse.COO)
+        else scipy.sparse.coo_matrix(np.asarray(wdata))
+    )
+    # store as (n_dst, n_src) CSR so the kernel is ``csr @ dense -> dense``
+    csr = scipy_coo.T.tocsr()
+    n_dst = csr.shape[0]
+    out_dtype = np.result_type(da.dtype, wdata.dtype)
+
+    def _matmul(arr: np.ndarray) -> np.ndarray:
+        flat = arr.reshape(-1, arr.shape[-1]).astype(out_dtype, copy=False)
+        dense: np.ndarray = np.asarray(csr @ flat.T).T  # (n_rows, n_dst)
+        return dense.reshape(*arr.shape[:-1], n_dst)
+
+    result: xr.DataArray = xr.apply_ufunc(
+        _matmul,
+        da,
+        input_core_dims=[[coord]],
+        output_core_dims=[[target_dim]],
+        exclude_dims={coord},
+        dask="parallelized",
+        output_dtypes=[out_dtype],
+        dask_gufunc_kwargs={
+            "output_sizes": {target_dim: n_dst},
+            "allow_rechunk": True,
+        },
+    )
+    result = result.assign_coords({target_dim: target_coords})
+    return result
+
+
 def apply_weights(
     da: xr.DataArray,
     weights: dict[Hashable, xr.DataArray],
     skipna: bool,
     nan_threshold: float,
 ) -> xr.DataArray:
-    """Apply the weights over all regridding dimensions simultaneously with `xr.dot`."""
+    """Apply the regridding weights over all regridding dimensions.
+
+    Each per-axis weight is applied with a scipy CSR sparse-dense matmul
+    (:func:`_csr_apply_axis`); separability lets us contract one axis at a time.
+    A direct CSR matmul is fast and, unlike a multi-operand sparse ``xr.dot``,
+    does not depend on ``opt_einsum`` (which makes that contraction 20-100x
+    slower when absent). The weights stay compressed and the result is dense.
+    """
     coords = list(weights.keys())
-    weight_arrays = list(weights.values())
 
+    def apply_all(arr: xr.DataArray) -> xr.DataArray:
+        for coord, weight in weights.items():
+            arr = _csr_apply_axis(arr, weight, coord)
+        return arr
+
+    da_regrid = apply_all(da.fillna(0))
     if skipna:
-        valid_frac = xr.dot(
-            da.notnull(), *weight_arrays, dim=list(weights.keys()), optimize=True
-        )
-
-    da_regrid: xr.DataArray = xr.dot(
-        da.fillna(0), *weight_arrays, dim=list(weights.keys()), optimize=True
-    )
-
-    if skipna:
-        da_regrid /= valid_frac
+        valid_frac = apply_all(da.notnull())
+        # Divide by the valid fraction, avoiding 0/0 where a target cell has no
+        # valid source (those cells are masked to NaN by the threshold below).
+        da_regrid = da_regrid / valid_frac.where(valid_frac != 0, 1.0)
         da_regrid = da_regrid.where(valid_frac >= get_valid_threshold(nan_threshold))
+
+    # apply_ufunc collapses/splits the new target dims, so restore the output
+    # chunking format_weights chose (from output_chunks / the input chunks).
+    rechunk = {
+        f"target_{coord}": weight.chunksizes[f"target_{coord}"]
+        for coord, weight in weights.items()
+        if weight.chunksizes.get(f"target_{coord}") is not None
+    }
+    if rechunk:
+        da_regrid = da_regrid.chunk(rechunk)
 
     # Rename temporary coordinates and ensure original dimension order
     coord_map = {f"target_{coord}": coord for coord in coords}
-    da_regrid = da_regrid.rename(coord_map).transpose(*da.dims)
-
-    return da_regrid
+    regridded: xr.DataArray = da_regrid.rename(coord_map)
+    regridded = regridded.transpose(*da.dims)
+    return regridded
 
 
 def get_valid_threshold(nan_threshold: float) -> float:

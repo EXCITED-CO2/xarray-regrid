@@ -185,3 +185,7 @@ warn_return_any = true
 warn_unused_ignores = true
 show_error_codes = true
 exclude = ["tests/*", "docs"]
+
+[[tool.mypy.overrides]]
+module = ["scipy.*"]
+ignore_missing_imports = true

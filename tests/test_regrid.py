@@ -254,6 +254,77 @@ def test_conservative_nan_thresholds_against_xesmf():
         xr.testing.assert_equal(data_regrid.isnull(), data_esmf.isnull())
 
 
+def test_conservative_conserves_known_integral():
+    """Gold-standard conservation for the axis-factored method.
+
+    ``cos^2(lat) * (1.5 + sin(lon))`` integrates to ``4*pi`` over the unit
+    sphere. Regridded with the spherical correction (``latitude_coord``) onto a
+    co-extensive coarser global grid, the integral is conserved to the grid
+    quadrature floor when measured with INDEPENDENT analytic spherical cell
+    areas (sin-latitude bands times dlon) -- not the regridder's own weights --
+    and the source integral approaches the known value.
+
+    A spatially-varying field + independent areas + matched domains exercises
+    the real weights, unlike a constant field (which any row-normalized
+    regridder reproduces) or a self-area check (a row-sum identity).
+    """
+
+    def centers(n, lo, hi):  # global cell centers; edges land exactly on lo/hi
+        edges = np.linspace(lo, hi, n + 1)
+        return 0.5 * (edges[:-1] + edges[1:])
+
+    def analytic_area(n_lon, n_lat):  # independent of the regridder
+        lat_e = np.deg2rad(np.linspace(-90, 90, n_lat + 1))
+        lon_e = np.deg2rad(np.linspace(-180, 180, n_lon + 1))
+        return np.diff(np.sin(lat_e))[:, None] * np.diff(lon_e)[None, :]
+
+    ns_lat, ns_lon, nt_lat, nt_lon = 120, 240, 40, 80
+    lat_s, lon_s = centers(ns_lat, -90, 90), centers(ns_lon, -180, 180)
+    lat_t, lon_t = centers(nt_lat, -90, 90), centers(nt_lon, -180, 180)
+    grid_lat, grid_lon = np.meshgrid(lat_s, lon_s, indexing="ij")
+    field = np.cos(np.deg2rad(grid_lat)) ** 2 * (1.5 + np.sin(np.deg2rad(grid_lon)))
+    da = xr.DataArray(field, dims=("lat", "lon"), coords={"lat": lat_s, "lon": lon_s})
+    target = xr.Dataset(coords={"lat": lat_t, "lon": lon_t})
+
+    out = (
+        da.regrid.conservative(target, latitude_coord="lat", skipna=False)
+        .transpose("lat", "lon")
+        .values
+    )
+    assert np.isfinite(out).all()  # co-extensive global grids -> full coverage
+
+    i_src = float((da.values * analytic_area(ns_lon, ns_lat)).sum())
+    i_tgt = float((out * analytic_area(nt_lon, nt_lat)).sum())
+    np.testing.assert_allclose(i_tgt, i_src, rtol=1e-5)  # mass conserved
+    np.testing.assert_allclose(i_src, 4 * np.pi, rtol=2e-3)  # ~ the known value
+
+
+def test_conservative_returns_dense_output():
+    """Regression guard: the regridded result must be a dense ndarray, not a
+    ``sparse.COO`` array.
+
+    Sparse weights are applied with a scipy CSR matmul (see
+    ``methods.conservative.apply_weights``), which produces a dense result. A
+    ``sparse.COO`` result here means the apply regressed to the sparse ``xr.dot``
+    path -- 20-100x slower without ``opt_einsum``, and a wasteful sparse
+    container for a dense field.
+    """
+    lat = np.linspace(-89, 89, 60)
+    lon = np.linspace(-179, 179, 120)
+    da = xr.DataArray(
+        np.cos(np.deg2rad(lat))[:, None] * np.ones(lon.size),
+        dims=("lat", "lon"),
+        coords={"lat": lat, "lon": lon},
+    )
+    target = xr.Dataset(
+        coords={"lat": np.linspace(-88, 88, 30), "lon": np.linspace(-178, 178, 60)}
+    )
+    out = da.regrid.conservative(target, latitude_coord="lat")
+    assert isinstance(out.data, np.ndarray), (
+        f"expected dense ndarray, got {type(out.data).__name__}"
+    )
+
+
 class TestCoordOrder:
     @pytest.mark.parametrize("method", ["linear", "nearest", "cubic"])
     @pytest.mark.parametrize("dataarray", [True, False])

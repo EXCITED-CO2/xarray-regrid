@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+Fixed:
+ - Conservative regridding with sparse weights (the default when the optional `sparse` package is installed) no longer depends on `opt-einsum` for acceptable performance. The per-axis weights are now applied with a scipy CSR sparse-dense matmul instead of a multi-operand sparse `xr.dot`, which was 20–80x slower when `opt-einsum` was absent (e.g. when installing the `conservative-2d` extra, which brings `sparse`, without `accel`, which brings `opt-einsum`). The weights stay sparse (no extra memory at high resolution), the regridded result is now a dense array rather than `sparse.COO`, and numerical results are unchanged.
+
 ## 0.4.2 (2026-01-28)
 
 New contributors:
