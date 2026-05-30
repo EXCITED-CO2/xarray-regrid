@@ -80,7 +80,7 @@ def create_lat_lon_coords(grid: Grid) -> tuple[np.ndarray, np.ndarray]:
             grid.south, grid.north + grid.resolution_lat, grid.resolution_lat
         )
 
-    if np.remainder((grid.east - grid.west), grid.resolution_lat) > 0:
+    if np.remainder((grid.east - grid.west), grid.resolution_lon) > 0:
         lon_coords = np.arange(grid.west, grid.east, grid.resolution_lon)
     else:
         lon_coords = np.arange(
@@ -114,6 +114,41 @@ def create_regridding_dataset(
     )
 
 
+def wrap_longitudes_to_target_window(
+    values: np.ndarray, target_first: float, target_last: float
+) -> np.ndarray:
+    """Per-value wrap of ``values`` (degrees) into a single 360° window
+    centered between the target endpoints. Used to align cross-convention
+    longitudes (source on ``[0, 360]`` vs target on ``[-180, 180]`` and
+    vice versa). The wrap point is ``(first + last + 360) / 2``."""
+    wrap_point = float(target_first + target_last + 360.0) / 2.0
+    values = np.where(values < wrap_point - 360.0, values + 360.0, values)
+    values = np.where(values > wrap_point, values - 360.0, values)
+    return values
+
+
+def infer_1d_edges(centers: np.ndarray) -> np.ndarray:
+    """Return cell edges from 1D centers: midpoints between consecutive
+    centers, with symmetric reflection for the two outer bounds.
+
+    Requires at least two centers.
+    """
+    c = np.asarray(centers, dtype=float)
+    if c.size < 2:
+        msg = "need at least two centers to infer cell edges"
+        raise ValueError(msg)
+    mids = 0.5 * (c[:-1] + c[1:])
+    left = 2 * c[0] - mids[0]
+    right = 2 * c[-1] - mids[-1]
+    return np.concatenate([[left], mids, [right]])
+
+
+def min_weight_dtype(*dtypes: np.dtype) -> np.dtype:
+    """Regrid-weight dtype policy: single precision at minimum, double if any
+    input is double. Shared by the conservative weight builders."""
+    return np.result_type(np.float32, *dtypes)
+
+
 def to_intervalindex(coords: np.ndarray) -> pd.IntervalIndex:
     """Convert a 1-d coordinate array to a pandas IntervalIndex. Take
     the midpoints between the coordinates as the interval boundaries.
@@ -126,20 +161,9 @@ def to_intervalindex(coords: np.ndarray) -> pd.IntervalIndex:
             coordinates.
     """
     if len(coords) > 1:
-        midpoints = (coords[:-1] + coords[1:]) / 2
-
-        # Extrapolate outer bounds beyond the first and last coordinates
-        left_bound = 2 * coords[0] - midpoints[0]
-        right_bound = 2 * coords[-1] - midpoints[-1]
-
-        breaks = np.concatenate([[left_bound], midpoints, [right_bound]])
-        intervals = pd.IntervalIndex.from_breaks(breaks)
-
-    else:
-        # If the target grid has a single point, set search interval to span all space
-        intervals = pd.IntervalIndex.from_breaks([-np.inf, np.inf])
-
-    return intervals
+        return pd.IntervalIndex.from_breaks(infer_1d_edges(coords))
+    # If the target grid has a single point, set search interval to span all space
+    return pd.IntervalIndex.from_breaks([-np.inf, np.inf])
 
 
 def overlap(a: pd.IntervalIndex, b: pd.IntervalIndex) -> np.ndarray:
@@ -357,11 +381,9 @@ def format_lon(
     # This ensures we have coverage on the target and handles global > regional
     source_vals = obj.coords[lon_coord].values
     target_vals = target.coords[lon_coord].values
-    wrap_point = (target_vals[-1] + target_vals[0] + 360) / 2
-    source_vals = np.where(
-        source_vals < wrap_point - 360, source_vals + 360, source_vals
+    source_vals = wrap_longitudes_to_target_window(
+        source_vals, float(target_vals[0]), float(target_vals[-1])
     )
-    source_vals = np.where(source_vals > wrap_point, source_vals - 360, source_vals)
     obj = update_coord(obj, lon_coord, source_vals)
 
     obj = ensure_monotonic(obj, lon_coord)
@@ -436,8 +458,8 @@ def update_coord(
 def update_coord(
     obj: xr.DataArray | xr.Dataset, coord: Hashable, coord_vals: np.ndarray
 ) -> xr.DataArray | xr.Dataset:
-    """Update the values of a coordinate, ensuring indexes stay in sync."""
-    attrs = obj.coords[coord].attrs
-    obj = obj.assign_coords({coord: coord_vals})
-    obj.coords[coord].attrs = attrs
-    return obj
+    """Update the values of a coordinate, ensuring indexes stay in sync.
+    Preserves the coord's existing dims and attrs (so multi-dim coords work)."""
+    original = obj.coords[coord]
+    new_coord = xr.DataArray(coord_vals, dims=original.dims, attrs=original.attrs)
+    return obj.assign_coords({coord: new_coord})

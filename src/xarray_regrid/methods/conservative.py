@@ -7,7 +7,7 @@ import numpy as np
 import xarray as xr
 
 try:
-    import sparse  # type: ignore
+    import sparse
 except ImportError:
     sparse = None
 
@@ -277,8 +277,7 @@ def format_weights(
     3. Weights are converted to a sparse representation (on a per chunk basis)
         if the `sparse` package is available.
     """
-    # Use single precision weights at minimum, double if input is double
-    weights_dtype = np.result_type(np.float32, input_dtype)
+    weights_dtype = utils.min_weight_dtype(input_dtype)
     new_weights = weights.copy().astype(weights_dtype)
 
     chunks: dict[Hashable, tuple[int, ...] | int] = {}

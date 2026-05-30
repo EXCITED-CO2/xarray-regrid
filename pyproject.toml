@@ -44,6 +44,22 @@ accel = [
   "opt-einsum",
   "dask[distributed]",
 ]
+conservative-2d = [
+  # For conservative regridding on grids that aren't 1D-separable
+  # (curvilinear, unstructured). Uses shapely for 2D polygon intersection.
+  "shapely>=2.0",
+  # Sparse weight storage. Without it the (n_dst, n_src) area matrix falls
+  # back to dense, which is infeasible for mesh/region problems of any size.
+  "sparse",
+  # Needed by ConservativeRegridder.to_netcdf / from_netcdf (group support).
+  "h5netcdf",
+]
+spherical = [
+  # Great-circle (s2) geometry for conservative_2d via spherely (s2geometry).
+  # Builds on conservative-2d.
+  "xarray-regrid[conservative-2d]",
+  "spherely>=0.1.1",
+]
 benchmarking = [
   "matplotlib",
   "zarr",
@@ -52,6 +68,15 @@ benchmarking = [
   "aiohttp",
   "pooch",
   "cftime",  # required for decode time of test netCDF files
+]
+notebooks = [
+  # Extra dependencies needed to run docs/notebooks/demos/*.ipynb.
+  # Combine with [conservative-2d] and [accel] for the full demo set,
+  # e.g.: pip install "xarray-regrid[notebooks,conservative-2d,accel]"
+  "matplotlib",
+  "pooch",          # xr.tutorial.open_dataset backend
+  "geopandas",      # polygon regions demo
+  "geodatasets",    # ships the ncovr US county boundaries
 ]
 dev = [
   "hatch",
@@ -74,7 +99,7 @@ docs = [  # Required for ReadTheDocs
 path = "src/xarray_regrid/__init__.py"
 
 [tool.hatch.envs.default]
-features = ["accel", "dev", "benchmarking"]
+features = ["accel", "dev", "benchmarking", "conservative-2d"]
 
 [tool.hatch.envs.default.scripts]
 lint = [
@@ -185,3 +210,18 @@ warn_return_any = true
 warn_unused_ignores = true
 show_error_codes = true
 exclude = ["tests/*", "docs"]
+
+# shapely, sparse, and spherely are untyped; the conservative_2d module bridges
+# to them, so treating every signature that mentions sparse.COO as an error is
+# noise.
+[[tool.mypy.overrides]]
+module = [
+  "xarray_regrid.methods.conservative_2d",
+  "xarray_regrid.methods._conservative_2d_serialization",
+]
+disallow_any_unimported = false
+warn_return_any = false
+
+[[tool.mypy.overrides]]
+module = ["shapely", "shapely.*", "sparse", "scipy", "scipy.*", "spherely"]
+ignore_missing_imports = true

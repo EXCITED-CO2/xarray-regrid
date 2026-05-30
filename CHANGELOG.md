@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+Added:
+ - `conservative_2d` regridding for grids that aren't 1D-separable: curvilinear (2D `lat`/`lon`) grids, unstructured meshes (`ConservativeRegridder.from_polygons`), and grid-to-polygon aggregation (e.g. gridded data → region shapes). Built on shapely 2 polygon intersection with optional `sparse` weight storage, an analytic cylindrical-equal-area `manifold="cea"` option for spherical areas on lat/lon grids, antimeridian handling, and netCDF weight-matrix caching. Exposed via the `.regrid.conservative_2d` accessor and the reusable `ConservativeRegridder` class; install with the `conservative-2d` extra ([#70](https://github.com/xarray-contrib/xarray-regrid/pull/70)).
+
 ## 0.4.2 (2026-01-28)
 
 New contributors:

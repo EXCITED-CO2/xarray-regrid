@@ -36,6 +36,7 @@ The following methods are supported:
 * `Linear <autoapi/xarray_regrid/regrid/index.html#xarray_regrid.regrid.Regridder.linear>`_
 * `Nearest-neighbor <autoapi/xarray_regrid/regrid/index.html#xarray_regrid.regrid.Regridder.nearest>`_
 * `Conservative <autoapi/xarray_regrid/regrid/index.html#xarray_regrid.regrid.Regridder.conservative>`_
+* `Conservative 2D (curvilinear / unstructured / polygon aggregation) <autoapi/xarray_regrid/regrid/index.html#xarray_regrid.regrid.Regridder.conservative_2d>`_
 * `Cubic <autoapi/xarray_regrid/regrid/index.html#xarray_regrid.regrid.Regridder.cubic>`_
 * `Zonal statistics <autoapi/xarray_regrid/regrid/index.html#xarray_regrid.regrid.Regridder.stat>`_
 * `"Most common value" (zonal statistics) <autoapi/xarray_regrid/regrid/index.html#xarray_regrid.regrid.Regridder.most_common>`_
